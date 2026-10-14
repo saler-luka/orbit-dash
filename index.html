@@ -1,0 +1,791 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="A one-button orbit-switching arcade game.">
+<title>Orbit Dash</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Audiowide&family=Chakra+Petch:wght@400;500;700&display=swap">
+<style>
+/* Layout: full-bleed canvas stage with the planet at center; HUD pinned to the top edge; menus are glass panels floating over the orbit */
+:root {
+  --space: #090c20;
+  --panel: rgba(15, 19, 46, .88);
+  --line: #2a3170;
+  --ink: #eef0ff;
+  --muted: #959cc9;
+  --amber: #ffb347;
+  --amber-ink: #2b1700;
+  --dust: #7fe7ff;
+  --hazard: #ff6b5b;
+  --good: #8af0a6;
+  --f-display: "Audiowide", "Segoe UI", sans-serif;
+  --f-ui: "Chakra Petch", "Segoe UI", system-ui, sans-serif;
+  color-scheme: dark;
+}
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--space); color: var(--ink);
+  font-family: var(--f-ui); font-size: 16px;
+  overflow: hidden; user-select: none; -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+#c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: pointer; }
+
+.hud {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 5; pointer-events: none;
+  padding: calc(env(safe-area-inset-top, 0px) + 12px) 16px 0;
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: start; gap: 8px;
+}
+.hud .score { font-family: var(--f-display); font-size: 30px; line-height: 1; font-variant-numeric: tabular-nums; }
+.hud .mult { margin-top: 4px; font-weight: 700; font-size: 16px; color: var(--amber); font-variant-numeric: tabular-nums; }
+.hud .center { text-align: center; }
+.hud .pname { font-family: var(--f-display); font-size: 14px; letter-spacing: .12em; }
+.hud .psub { font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.hud .right { text-align: right; }
+.hud .dust { font-weight: 700; font-size: 18px; color: var(--dust); font-variant-numeric: tabular-nums; }
+.hud .shield { margin-top: 4px; font-size: 13px; font-weight: 700; color: var(--good); }
+.hint {
+  position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom, 0px) + 28px); transform: translateX(-50%);
+  z-index: 5; pointer-events: none; padding: 8px 16px; border-radius: 999px;
+  background: var(--panel); border: 1px solid var(--line); font-weight: 700; white-space: nowrap;
+  animation: breathe 1.4s ease-in-out infinite;
+}
+@keyframes breathe { 50% { opacity: .55; } }
+.toast {
+  position: fixed; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 74px); z-index: 20;
+  transform: translate(-50%, -8px); opacity: 0; pointer-events: none;
+  max-width: calc(100% - 32px); padding: 8px 16px; border-radius: 999px;
+  background: var(--panel); border: 1px solid var(--dust); color: var(--ink);
+  font-weight: 700; font-size: 15px; text-align: center; transition: opacity .2s, transform .2s;
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+.banner {
+  position: fixed; left: 0; right: 0; top: 24%; z-index: 6; pointer-events: none; text-align: center;
+  animation: banner 2.2s ease-out forwards;
+}
+.banner .bn { font-family: var(--f-display); font-size: clamp(30px, 8vw, 48px); letter-spacing: .08em; text-shadow: 0 0 24px currentColor; }
+.banner .bs { font-size: 14px; letter-spacing: .2em; text-transform: uppercase; color: var(--ink); margin-top: 4px; }
+@keyframes banner { 0% { opacity: 0; transform: scale(1.4); letter-spacing: .4em; } 12% { opacity: 1; transform: scale(1); } 75% { opacity: 1; } 100% { opacity: 0; transform: translateY(-16px); } }
+
+.overlay {
+  position: fixed; inset: 0; z-index: 10; display: grid; place-items: center;
+  padding: calc(env(safe-area-inset-top, 0px) + 16px) 16px calc(env(safe-area-inset-bottom, 0px) + 16px);
+  background: rgba(6, 8, 24, .35);
+}
+.panel {
+  width: min(100%, 400px); max-height: 100%; overflow: auto; box-sizing: border-box;
+  padding: 22px 20px; border-radius: 20px;
+  background: var(--panel); border: 1px solid var(--line);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, .55);
+  display: flex; flex-direction: column; gap: 14px;
+}
+.logo { margin: 0; font-family: var(--f-display); font-weight: 400; font-size: clamp(38px, 11vw, 52px); line-height: 1; text-align: center; letter-spacing: .04em; }
+.logo span { color: var(--amber); text-shadow: 0 0 22px rgba(255, 179, 71, .55); }
+.tag { margin: 0; text-align: center; color: var(--muted); font-size: 15px; }
+h2 { margin: 0; font-family: var(--f-display); font-weight: 400; font-size: 24px; text-wrap: balance; }
+h3 { margin: 0 0 6px; font-size: 12px; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); }
+.statrow { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.stat { padding: 8px 10px; border-radius: 12px; background: rgba(255, 255, 255, .04); border: 1px solid var(--line); }
+.stat .l { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.stat .v { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.stat .v.dust { color: var(--dust); }
+.bigscore { font-family: var(--f-display); font-size: 48px; line-height: 1; text-align: center; font-variant-numeric: tabular-nums; }
+.newbest { display: block; width: max-content; margin: 6px auto 0; padding: 2px 10px; border-radius: 999px; background: var(--amber); color: var(--amber-ink); font-size: 13px; font-weight: 700; }
+.sub { text-align: center; color: var(--muted); margin: 0; }
+.reward { text-align: center; font-weight: 700; color: var(--dust); }
+.btns { display: flex; flex-wrap: wrap; gap: 8px; }
+.btn {
+  flex: 1 1 auto; padding: 11px 14px; border-radius: 12px; cursor: pointer;
+  background: rgba(255, 255, 255, .05); border: 1px solid var(--line); color: var(--ink);
+  font: 700 15px var(--f-ui); letter-spacing: .04em;
+}
+.btn:hover:not(:disabled) { border-color: #4a55a8; }
+.btn.primary { background: var(--amber); border-color: var(--amber); color: var(--amber-ink); font-size: 17px; }
+.btn:disabled { opacity: .45; cursor: default; }
+.btn kbd { font: inherit; opacity: .6; font-size: 12px; margin-left: 6px; }
+button:focus-visible { outline: 2px solid var(--dust); outline-offset: 2px; }
+.missions { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.mission { padding: 9px 12px; border-radius: 12px; background: rgba(255, 255, 255, .04); border: 1px solid var(--line); }
+.mission .mt { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; }
+.mission .mr { color: var(--dust); font-weight: 700; white-space: nowrap; }
+.mission .bar { margin-top: 6px; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, .08); overflow: hidden; }
+.mission .bar i { display: block; height: 100%; background: var(--dust); }
+.mission.done { border-color: var(--good); }
+.mission.done .bar i { background: var(--good); }
+.mission.done .mr { color: var(--good); }
+.how { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 14px; color: var(--muted); line-height: 1.4; }
+.how b { color: var(--ink); }
+.shop { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; }
+.item {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 10px 6px; border-radius: 12px; cursor: pointer;
+  background: rgba(255, 255, 255, .04); border: 1px solid var(--line); color: var(--ink); font: 700 14px var(--f-ui);
+}
+.item.on { border-color: var(--amber); box-shadow: inset 0 0 0 1px var(--amber); }
+.item:disabled { opacity: .45; cursor: default; }
+.item .sw { width: 34px; height: 34px; border-radius: 50%; }
+.item .price { font-size: 13px; color: var(--dust); }
+.item.on .price { color: var(--amber); }
+.perk { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 12px; background: rgba(255, 255, 255, .04); border: 1px solid var(--line); }
+.perk .pm { flex: 1; min-width: 0; }
+.perk .pn { font-weight: 700; }
+.perk .pd { font-size: 13px; color: var(--muted); line-height: 1.35; }
+.perk .btn { flex: 0 0 auto; min-width: 84px; }
+.purse { color: var(--dust); font-weight: 700; font-variant-numeric: tabular-nums; }
+.head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.icon-btn {
+  position: fixed; z-index: 11; right: 16px; bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
+  padding: 8px 14px; border-radius: 999px; cursor: pointer;
+  background: var(--panel); border: 1px solid var(--line); color: var(--muted); font: 700 13px var(--f-ui);
+}
+@media (prefers-reduced-motion: reduce) {
+  .hint { animation: none; }
+  .banner { animation-duration: 2.6s; }
+}
+</style>
+
+<canvas id="c" aria-label="Orbit Dash game. Tap or press Space to switch orbit."></canvas>
+
+<div class="hud" id="hud" hidden>
+  <div><div class="score" id="hScore">0</div><div class="mult" id="hMult"></div></div>
+  <div class="center"><div class="pname" id="hPlanet">Cindra</div><div class="psub" id="hPsub">Planet 1</div></div>
+  <div class="right"><div class="dust" id="hDust">✦ 0</div><div class="shield" id="hShield"></div></div>
+</div>
+<div class="hint" id="hint" hidden>Tap or press Space to switch orbit</div>
+<div class="toast" id="toast"></div>
+<div class="overlay" id="overlay"><div class="panel" id="panel"></div></div>
+<button class="icon-btn" id="soundBtn" type="button">Sound on</button>
+
+<script>
+(() => {
+'use strict';
+const KEY = 'orbitDash.v1';
+const loadMeta = () => { try { return JSON.parse(localStorage.getItem(KEY)); } catch (e) { return null; } };
+const meta = Object.assign({
+  dust: 0, best: 0, daily: {}, runs: 0, skin: 'amber', trail: 'ember', owned: { amber: 1, ember: 1 },
+  shields: 0, magnet: 0, lucky: 0, missions: [], mTier: 0, muted: false
+}, loadMeta() || {});
+const saveMeta = () => { try { localStorage.setItem(KEY, JSON.stringify(meta)); } catch (e) {} };
+
+const $ = s => document.querySelector(s);
+const fmt = n => Math.floor(n).toLocaleString('en-US');
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const hash = s => { let h = 2166136261; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h >>> 0; };
+const TAU = Math.PI * 2;
+
+// ---------- content ----------
+const PLANETS = [
+  { name: 'Cindra', h: 28, intro: 'Debris field' },
+  { name: 'Vesper', h: 178, intro: 'Comets incoming' },
+  { name: 'Morrow', h: 275, intro: 'Drift mines' },
+  { name: 'Kessin', h: 350, intro: 'Debris walls' },
+  { name: 'Halo', h: 205, intro: 'Everything at once' },
+  { name: 'Umber', h: 45, intro: 'Faster still' },
+  { name: 'Thessaly', h: 140, intro: 'Faster still' }
+];
+const ROMAN = ['', '', ' II', ' III', ' IV', ' V', ' VI', ' VII', ' VIII'];
+const planetOf = i => { const p = PLANETS[i % PLANETS.length]; return { ...p, name: p.name + (ROMAN[Math.floor(i / PLANETS.length) + 1] || '+') }; };
+const SKINS = [
+  { id: 'amber', name: 'Amber', cost: 0, color: '#ffb347' },
+  { id: 'mint', name: 'Mint', cost: 60, color: '#6cf2c2' },
+  { id: 'rose', name: 'Rose', cost: 120, color: '#ff7ab8' },
+  { id: 'ice', name: 'Glacier', cost: 220, color: '#b6dcff' },
+  { id: 'prism', name: 'Prism', cost: 500, color: null }
+];
+const TRAILS = [
+  { id: 'ember', name: 'Ember', cost: 0 },
+  { id: 'ion', name: 'Ion', cost: 80 },
+  { id: 'sparks', name: 'Sparks', cost: 180 },
+  { id: 'spectrum', name: 'Spectrum', cost: 400 }
+];
+const LUCKY_COST = [100, 220, 420];
+const MAGNET_COST = 160, SHIELD_COST = 35, MAX_SHIELDS = 3;
+
+// ---------- missions ----------
+const MT = {
+  graze:   { txt: n => `Graze ${n} hazards in one run`, target: k => 3 + 2 * k },
+  planet:  { txt: n => `Reach planet ${n}`, target: k => 2 + Math.floor(k / 3) },
+  dust:    { txt: n => `Collect ${n} stardust in one run`, target: k => 8 + 5 * k },
+  score:   { txt: n => `Score ${fmt(n)} in one run`, target: k => 400 + 350 * k },
+  survive: { txt: n => `Survive ${n} seconds`, target: k => 20 + 8 * k },
+  switch:  { txt: n => `Switch orbits ${n} times in one run`, target: k => 25 + 10 * k },
+  runs:    { txt: n => `Play ${n} runs`, target: k => 3 + k }
+};
+function newMission() {
+  const used = meta.missions.filter(m => !m.done).map(m => m.type);
+  const types = Object.keys(MT).filter(t => !used.includes(t));
+  const type = types[Math.floor(Math.random() * types.length)];
+  const k = Math.floor(meta.mTier / 2);
+  meta.mTier++;
+  return { type, n: MT[type].target(k), reward: 20 + 6 * k, p: 0, done: false };
+}
+function refreshMissions() {
+  meta.missions = meta.missions.filter(m => !m.done);
+  while (meta.missions.length < 3) meta.missions.push(newMission());
+  saveMeta();
+}
+refreshMissions();
+function missionValue(m) {
+  if (m.type === 'runs') return m.p;
+  if (!G || G.kind === 'attract') return 0;
+  return { graze: G.grazes, planet: G.planet + 1, dust: G.dustRun, score: G.score, survive: G.t, switch: G.switches }[m.type];
+}
+function checkMissions() {
+  for (const m of meta.missions) {
+    if (m.done || missionValue(m) < m.n) continue;
+    m.done = true; meta.dust += m.reward; saveMeta();
+    toast(`Mission complete: ${MT[m.type].txt(m.n)} · ✦ +${m.reward}`);
+    sfx.mission();
+  }
+}
+
+// ---------- audio ----------
+let ac = null;
+function audio() {
+  if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return null; } }
+  if (ac.state === 'suspended') ac.resume();
+  return ac;
+}
+function tone(freq, dur = .1, type = 'sine', vol = .1, when = 0, slideTo = 0) {
+  if (meta.muted) return; const a = audio(); if (!a) return;
+  const t = a.currentTime + when, o = a.createOscillator(), g = a.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, t);
+  if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
+  g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + .008); g.gain.exponentialRampToValueAtTime(.0001, t + dur);
+  o.connect(g).connect(a.destination); o.start(t); o.stop(t + dur + .03);
+}
+function noise(dur, vol, freq) {
+  if (meta.muted) return; const a = audio(); if (!a) return;
+  const buf = a.createBuffer(1, Math.floor(a.sampleRate * dur), a.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 2);
+  const s = a.createBufferSource(), f = a.createBiquadFilter(), g = a.createGain();
+  f.type = 'lowpass'; f.frequency.value = freq; g.gain.value = vol;
+  s.buffer = buf; s.connect(f).connect(g).connect(a.destination); s.start();
+}
+const sfx = {
+  flip: lane => tone(lane ? 520 : 390, .07, 'triangle', .06, 0, lane ? 640 : 320),
+  graze: n => { tone(880 + Math.min(n, 12) * 40, .12, 'square', .035); tone(1320 + Math.min(n, 12) * 60, .1, 'sine', .04, .04); },
+  dust: n => tone(660 * Math.pow(2, (Math.min(n, 12) * 2) / 12), .09, 'sine', .06),
+  boom: () => { noise(.7, .9, 900); tone(140, .5, 'sawtooth', .07, 0, 40); },
+  shield: () => { noise(.25, .5, 2500); tone(300, .3, 'triangle', .08, 0, 900); },
+  hop: () => tone(180, .9, 'sawtooth', .05, 0, 1400),
+  mission: () => [0, 4, 7, 12].forEach((s, i) => tone(523 * Math.pow(2, s / 12), .18, 'triangle', .07, i * .07)),
+  buy: () => { tone(700, .07, 'square', .04); tone(1050, .14, 'square', .04, .06); },
+  ui: () => tone(500, .05, 'triangle', .04)
+};
+
+// ---------- canvas ----------
+const cv = $('#c'), ctx = cv.getContext('2d');
+let W = 0, H = 0, dpr = 1, S = 200, cx = 0, cy = 0, R = [80, 120];
+const stars = [];
+function resize() {
+  dpr = Math.min(2, window.devicePixelRatio || 1);
+  W = innerWidth; H = innerHeight;
+  cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  S = Math.min(380, Math.min(W, H) / 2);
+  cx = W / 2; cy = H / 2 + (H > W ? S * .12 : S * .06);
+  R = [S * .46, S * .72];
+  if (!stars.length) for (let i = 0; i < 170; i++) stars.push({ r: Math.sqrt(Math.random()) * 1.1, a: Math.random() * TAU, s: .4 + Math.random() * 1.4, p: Math.random() * TAU });
+}
+resize(); addEventListener('resize', resize);
+
+// ---------- game ----------
+let G = null, mode = 'menu', overReady = 0, starRot = 0, parts = [], texts = [];
+function rand() {
+  let t = G.rng = (G.rng + 0x6D2B79F5) | 0;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+const perk = k => G && G.kind === 'std' ? meta[k] : 0;
+function makeGame(kind) {
+  const date = todayStr(), th = -Math.PI / 2;
+  return {
+    kind, date, rng: kind === 'daily' ? hash('orbit-dash:' + date) : (Math.random() * 4294967296) >>> 0,
+    t: 0, theta: th, omega: 1.5, lane: 1, laneF: 1, lastSwitchT: -9, lastSwitchFrom: -1,
+    ents: [], nextSpawn: th + 1.9, score: 0, mult: 1, decayT: 0, grazes: 0, dustRun: 0, dustStreak: 0, lastDustT: -9,
+    switches: 0, planet: 0, planetT: 0, prevHue: PLANETS[0].h, hop: 0,
+    shields: kind === 'std' ? meta.shields : 0, invuln: 0, alive: true,
+    trail: [], shake: 0, flash: 0, slow: 0
+  };
+}
+const HOP_EVERY = 22, AHEAD = 2.5;
+const SZ = { debris: .062, comet: .052, mine: .058, dust: .034 };
+function addEnt(type, a, lane, extra) {
+  const e = Object.assign({ type, a, lane, k: SZ[type], rot: Math.random() * TAU, spin: (Math.random() - .5) * 3, passed: false, done: false }, extra || {});
+  if (type === 'debris') { e.verts = []; const n = 7 + Math.floor(Math.random() * 3); for (let i = 0; i < n; i++) e.verts.push(.7 + Math.random() * .45); }
+  G.ents.push(e);
+}
+function reaction() { return Math.max(.44, .95 - G.t * .0045 - G.planet * .03) * (.9 + rand() * .4); }
+function spawnPattern() {
+  const p = G.planet, gap = G.omega * reaction(), a = G.nextSpawn, L = rand() < .5 ? 0 : 1;
+  const opts = [['single', 3], ['forced', G.t > 6 ? 3 : 0], ['dust', 2], ['comet', p >= 1 ? 3 : 0], ['mine', p >= 2 ? 2.5 : 0], ['wall', p >= 3 ? 2 : 0]];
+  let total = opts.reduce((s, o) => s + o[1], 0), r = rand() * total, pick = 'single';
+  for (const [n, w] of opts) { if ((r -= w) < 0) { pick = n; break; } }
+  let span = 1;
+  const dustChance = .3 * (1 + .25 * perk('lucky'));
+  if (pick === 'single') {
+    addEnt('debris', a, L);
+    if (rand() < dustChance) addEnt('dust', a + .02, L ^ 1);
+  } else if (pick === 'forced') {
+    addEnt('debris', a, L); addEnt('debris', a + gap * .6, L ^ 1); span = 1.6;
+  } else if (pick === 'dust') {
+    const n = 3 + perk('lucky');
+    for (let i = 0; i < n; i++) addEnt('dust', a + i * .11, L);
+    if (rand() < .5) addEnt('debris', a + n * .055, L ^ 1);
+    span = .8 + n * .08;
+  } else if (pick === 'comet') {
+    const v = .5 + rand() * .4 + p * .03;
+    addEnt('comet', a + v * ((a - G.theta) / G.omega), L, { v }); span = 1.2;
+  } else if (pick === 'mine') {
+    addEnt('mine', a, L, { flip: .9 + rand() * .6, period: 1.25 }); span = 1.3;
+  } else if (pick === 'wall') {
+    addEnt('debris', a, L); addEnt('debris', a + gap * .45, L ^ 1); addEnt('debris', a + gap * .9, L); span = 2;
+  }
+  G.nextSpawn = a + gap * span;
+}
+function start(kind) {
+  audio(); refreshMissions();
+  G = makeGame(kind); mode = 'play'; parts = []; texts = [];
+  $('#overlay').hidden = true; $('#hud').hidden = false;
+  $('#hint').hidden = meta.runs >= 2;
+  showBanner(0);
+  updateHud(true);
+}
+function flip() {
+  if (mode !== 'play' || !G.alive) return;
+  G.lastSwitchFrom = G.lane; G.lastSwitchT = G.t; G.lane ^= 1; G.switches++;
+  sfx.flip(G.lane);
+  if (G.t > 3) $('#hint').hidden = true;
+}
+function hop() {
+  G.prevHue = planetOf(G.planet).h;
+  G.planet++; G.planetT = 0; G.hop = 1; G.flash = .5;
+  G.ents = G.ents.filter(e => e.a - G.theta < .35);
+  G.nextSpawn = G.theta + 2.1;
+  G.score += 250 * G.mult;
+  showBanner(G.planet); sfx.hop();
+  for (let i = 0; i < 40; i++) {
+    const a = Math.random() * TAU;
+    parts.push({ x: cx + Math.cos(a) * R[1], y: cy + Math.sin(a) * R[1], vx: Math.cos(a) * 3, vy: Math.sin(a) * 3, life: 1, d: .015, s: 2.5, c: `${planetOf(G.planet).h},90%,70%` });
+  }
+}
+function shipPos() {
+  const r = R[0] + (R[1] - R[0]) * G.laneF;
+  return [cx + Math.cos(G.theta) * r, cy + Math.sin(G.theta) * r];
+}
+function entPos(e) { return [cx + Math.cos(e.a) * R[e.lane], cy + Math.sin(e.a) * R[e.lane]]; }
+function burst(x, y, c, n, sp) {
+  if (reduced) n = Math.ceil(n / 3);
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * TAU, v = (.3 + Math.random()) * sp;
+    parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 1, d: .012 + Math.random() * .025, s: 1 + Math.random() * 2.6, c });
+  }
+}
+function floatText(x, y, text, color, size = 18) { texts.push({ x, y, text, color, size, life: 1 }); }
+function graze(e) {
+  G.grazes++; G.mult = Math.min(5, G.mult + .25); G.decayT = G.t;
+  const pts = Math.round(50 * G.mult); G.score += pts;
+  const [x, y] = shipPos();
+  burst(x, y, '45,100%,70%', 16, 3);
+  floatText(x, y - 18, `GRAZE ×${G.mult.toFixed(2).replace(/\.?0+$/, '')}`, '#ffd27a', 16);
+  sfx.graze(G.grazes);
+  if (!reduced) G.shake = Math.max(G.shake, 3);
+}
+function collect(e) {
+  e.done = true; G.dustRun++;
+  G.dustStreak = G.t - G.lastDustT < 1 ? G.dustStreak + 1 : 0; G.lastDustT = G.t;
+  const [x, y] = entPos(e); burst(x, y, '190,100%,75%', 8, 2);
+  sfx.dust(G.dustStreak);
+}
+function hit(e) {
+  if (G.invuln > 0) return;
+  const [x, y] = shipPos();
+  if (G.shields > 0) {
+    G.shields--; if (G.kind === 'std') { meta.shields = Math.max(0, meta.shields - 1); saveMeta(); }
+    G.invuln = 1.2; e.done = true;
+    burst(x, y, '140,90%,70%', 30, 4); sfx.shield(); G.shake = 8; G.flash = .3;
+    toast('Shield absorbed the hit');
+    return;
+  }
+  G.alive = false; G.slow = .7; G.shake = reduced ? 0 : 16; G.flash = .6;
+  burst(x, y, skinHsl(), 50, 5.5); burst(x, y, '8,95%,65%', 40, 4);
+  sfx.boom();
+  $('#hint').hidden = true;
+  setTimeout(gameOver, 950);
+}
+function update(dt) {
+  starRot += dt * (mode === 'play' && G.alive ? G.omega * .03 : .015);
+  for (const p of parts) { p.x += p.vx * dt * 60; p.y += p.vy * dt * 60; p.vx *= .97; p.vy *= .97; p.life -= p.d * dt * 60; }
+  parts = parts.filter(p => p.life > 0);
+  for (const t of texts) { t.y -= 40 * dt; t.life -= dt * 1.1; }
+  texts = texts.filter(t => t.life > 0);
+  G.flash = Math.max(0, G.flash - dt * 1.6);
+  G.shake *= Math.pow(.004, dt);
+  G.hop = Math.max(0, G.hop - dt * 1.25);
+  G.laneF += Math.sign(G.lane - G.laneF) * Math.min(Math.abs(G.lane - G.laneF), dt / .11);
+
+  if (mode === 'menu') { G.theta += .9 * dt; pushTrail(); return; }
+  if (mode !== 'play' || !G.alive) return;
+
+  G.t += dt; G.planetT += dt;
+  G.omega = Math.min(3.4, 1.5 + G.t * .012 + G.planet * .08);
+  G.theta += G.omega * dt;
+  G.invuln = Math.max(0, G.invuln - dt);
+  if (G.mult > 1 && G.t - G.decayT > 4) { G.mult = Math.max(1, G.mult - .25); G.decayT = G.t; }
+  G.score += dt * G.omega * 12 * G.mult;
+  if (G.planetT >= HOP_EVERY) hop();
+  while (G.nextSpawn < G.theta + AHEAD) spawnPattern();
+
+  const shipK = .03 * S;
+  for (const e of G.ents) {
+    if (e.done) continue;
+    e.rot += e.spin * dt;
+    if (e.type === 'comet') e.a -= e.v * dt;
+    let d = e.a - G.theta;
+    if (e.type === 'mine' && d > .4) { e.flip -= dt; if (e.flip <= 0) { e.lane ^= 1; e.flip = e.period; } }
+    const sameLane = Math.abs(G.laneF - e.lane) < .5;
+    if (sameLane && Math.abs(d) * R[e.lane] < e.k * S + shipK) {
+      if (e.type === 'dust') collect(e); else { hit(e); if (!G.alive) return; }
+      continue;
+    }
+    if (!e.passed && d < 0) {
+      e.passed = true;
+      if (e.type === 'dust') { if (perk('magnet')) collect(e); }
+      else if (G.lastSwitchFrom === e.lane && G.lane !== e.lane && G.t - G.lastSwitchT < .4) graze(e);
+    }
+  }
+  G.ents = G.ents.filter(e => !e.done && e.a - G.theta > -.9);
+  pushTrail();
+  checkMissions();
+}
+function pushTrail() {
+  const [x, y] = shipPos();
+  G.trail.push({ x, y }); if (G.trail.length > 26) G.trail.shift();
+  if (meta.trail === 'sparks' && Math.random() < .5) parts.push({ x, y, vx: (Math.random() - .5) * .8, vy: (Math.random() - .5) * .8, life: .8, d: .03, s: 1.4, c: '0,0%,100%' });
+}
+
+// ---------- drawing ----------
+function skinColor(t = performance.now() / 1000) {
+  const s = SKINS.find(k => k.id === meta.skin) || SKINS[0];
+  return s.color || `hsl(${(t * 90) % 360} 95% 66%)`;
+}
+function skinHsl() {
+  const m = { amber: '33,100%,64%', mint: '158,84%,69%', rose: '330,100%,74%', ice: '210,100%,86%' };
+  return m[meta.skin] || `${Math.floor(Math.random() * 360)},95%,66%`;
+}
+function trailColor(i, n, t) {
+  if (meta.trail === 'ion') return `rgba(127,231,255,${i / n})`;
+  if (meta.trail === 'spectrum') return `hsla(${(t * 120 + i * 14) % 360},95%,65%,${i / n})`;
+  if (meta.trail === 'sparks') return `rgba(255,255,255,${(i / n) * .7})`;
+  return null;
+}
+function draw() {
+  const t = performance.now() / 1000;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const ph = planetOf(G.planet).h, hue = G.hop > .5 ? G.prevHue : ph;
+  const bg = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(W, H) * .75);
+  bg.addColorStop(0, `hsl(${hue} 45% 13%)`); bg.addColorStop(.55, '#0b0e26'); bg.addColorStop(1, '#06081a');
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+
+  ctx.save();
+  if (G.shake > .3) ctx.translate((Math.random() - .5) * G.shake, (Math.random() - .5) * G.shake);
+
+  const diag = Math.hypot(W, H) * .6;
+  for (const s of stars) {
+    const a = s.a + starRot * (.5 + s.s * .3), x = cx + Math.cos(a) * s.r * diag, y = cy + Math.sin(a) * s.r * diag;
+    ctx.globalAlpha = .35 + .35 * Math.sin(t * 2 + s.p);
+    ctx.fillStyle = '#dfe4ff'; ctx.fillRect(x, y, s.s, s.s);
+  }
+  ctx.globalAlpha = 1;
+
+  // planet
+  const pScale = G.hop > 0 ? 1 - .45 * Math.sin(Math.PI * G.hop) : 1, pr = S * .27 * pScale;
+  const glow = ctx.createRadialGradient(cx, cy, pr * .8, cx, cy, pr * 2.1);
+  glow.addColorStop(0, `hsla(${hue},90%,60%,.35)`); glow.addColorStop(1, `hsla(${hue},90%,60%,0)`);
+  ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(cx, cy, pr * 2.1, 0, TAU); ctx.fill();
+  const pg = ctx.createRadialGradient(cx - pr * .35, cy - pr * .4, pr * .1, cx, cy, pr);
+  pg.addColorStop(0, `hsl(${hue} 85% 72%)`); pg.addColorStop(.6, `hsl(${hue} 60% 38%)`); pg.addColorStop(1, `hsl(${hue} 60% 16%)`);
+  ctx.fillStyle = pg; ctx.beginPath(); ctx.arc(cx, cy, pr, 0, TAU); ctx.fill();
+  ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, pr, 0, TAU); ctx.clip();
+  ctx.strokeStyle = `hsla(${hue},70%,85%,.12)`; ctx.lineWidth = pr * .12;
+  for (let i = -2; i <= 2; i++) { ctx.beginPath(); ctx.ellipse(cx, cy + i * pr * .38, pr * 1.2, pr * .12, 0, 0, TAU); ctx.stroke(); }
+  ctx.restore();
+
+  // orbits
+  ctx.lineWidth = 1.5;
+  for (let i = 0; i < 2; i++) {
+    const active = mode === 'play' && G.lane === i;
+    ctx.strokeStyle = active ? 'rgba(238,240,255,.38)' : 'rgba(238,240,255,.13)';
+    ctx.setLineDash([3, 9]); ctx.lineDashOffset = -G.theta * R[i];
+    ctx.beginPath(); ctx.arc(cx, cy, R[i], 0, TAU); ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  // entities
+  for (const e of G.ents) {
+    const d = e.a - G.theta, alpha = Math.max(0, Math.min(1, (AHEAD - d) / .5));
+    const [x, y] = entPos(e), sz = e.k * S;
+    ctx.globalAlpha = alpha;
+    if (e.type === 'debris') {
+      ctx.save(); ctx.translate(x, y); ctx.rotate(e.rot);
+      ctx.beginPath();
+      e.verts.forEach((v, i) => { const a = i / e.verts.length * TAU; ctx[i ? 'lineTo' : 'moveTo'](Math.cos(a) * sz * v, Math.sin(a) * sz * v); });
+      ctx.closePath(); ctx.fillStyle = '#3a2430'; ctx.fill();
+      ctx.strokeStyle = '#ff6b5b'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.restore();
+    } else if (e.type === 'comet') {
+      const ta = e.a + .28, tx = cx + Math.cos(ta) * R[e.lane], ty = cy + Math.sin(ta) * R[e.lane];
+      const tg = ctx.createLinearGradient(x, y, tx, ty);
+      tg.addColorStop(0, 'rgba(255,170,120,.9)'); tg.addColorStop(1, 'rgba(255,107,91,0)');
+      ctx.strokeStyle = tg; ctx.lineWidth = sz * 1.1; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.arc(cx, cy, R[e.lane], e.a, ta); ctx.stroke(); ctx.lineCap = 'butt';
+      ctx.fillStyle = '#fff1e0'; ctx.beginPath(); ctx.arc(x, y, sz * .75, 0, TAU); ctx.fill();
+      ctx.strokeStyle = '#ff6b5b'; ctx.lineWidth = 2; ctx.stroke();
+    } else if (e.type === 'mine') {
+      const warn = e.flip < .4 && d > .4 && Math.sin(t * 40) > 0;
+      ctx.save(); ctx.translate(x, y); ctx.rotate(e.rot);
+      ctx.strokeStyle = warn ? '#ffffff' : '#ff6b5b'; ctx.lineWidth = 2;
+      for (let i = 0; i < 8; i++) { const a = i / 8 * TAU; ctx.beginPath(); ctx.moveTo(Math.cos(a) * sz * .5, Math.sin(a) * sz * .5); ctx.lineTo(Math.cos(a) * sz * 1.05, Math.sin(a) * sz * 1.05); ctx.stroke(); }
+      ctx.fillStyle = warn ? '#ffd2cc' : '#5a1f2a'; ctx.beginPath(); ctx.arc(0, 0, sz * .6, 0, TAU); ctx.fill(); ctx.stroke();
+      ctx.restore();
+      if (e.flip < .4 && d > .4) {
+        const [ox, oy] = [cx + Math.cos(e.a) * R[e.lane ^ 1], cy + Math.sin(e.a) * R[e.lane ^ 1]];
+        ctx.strokeStyle = 'rgba(255,107,91,.6)'; ctx.setLineDash([3, 4]); ctx.beginPath(); ctx.arc(ox, oy, sz * .8, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
+      }
+    } else if (e.type === 'dust') {
+      ctx.save(); ctx.translate(x, y); ctx.rotate(t * 3 + e.rot);
+      ctx.fillStyle = '#7fe7ff'; ctx.shadowColor = '#7fe7ff'; ctx.shadowBlur = 10;
+      ctx.beginPath(); ctx.moveTo(0, -sz); ctx.lineTo(sz * .6, 0); ctx.lineTo(0, sz); ctx.lineTo(-sz * .6, 0); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+  }
+  ctx.globalAlpha = 1;
+
+  // trail + ship
+  if (G.alive || mode === 'menu') {
+    const tr = G.trail, n = tr.length, base = skinColor(t);
+    ctx.lineCap = 'round';
+    for (let i = 1; i < n; i++) {
+      const c = trailColor(i, n, t);
+      ctx.strokeStyle = c || base; ctx.globalAlpha = c ? 1 : (i / n) * .8;
+      ctx.lineWidth = S * .028 * (i / n);
+      ctx.beginPath(); ctx.moveTo(tr[i - 1].x, tr[i - 1].y); ctx.lineTo(tr[i].x, tr[i].y); ctx.stroke();
+    }
+    ctx.globalAlpha = 1; ctx.lineCap = 'butt';
+    const [x, y] = shipPos(), sz = S * .042, h = G.theta + Math.PI / 2;
+    const blink = G.invuln > 0 && Math.sin(t * 30) > 0;
+    if (!blink) {
+      ctx.save(); ctx.translate(x, y); ctx.rotate(h);
+      ctx.shadowColor = base; ctx.shadowBlur = 16; ctx.fillStyle = base;
+      ctx.beginPath(); ctx.moveTo(sz * 1.5, 0); ctx.lineTo(-sz, sz * .85); ctx.lineTo(-sz * .45, 0); ctx.lineTo(-sz, -sz * .85); ctx.closePath(); ctx.fill();
+      ctx.restore();
+      if (G.shields > 0) { ctx.strokeStyle = 'rgba(138,240,166,.7)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x, y, sz * 1.9, 0, TAU); ctx.stroke(); }
+    }
+  }
+
+  // particles + texts
+  ctx.globalCompositeOperation = 'lighter';
+  for (const p of parts) { ctx.fillStyle = `hsla(${p.c},${Math.max(0, p.life)})`; ctx.beginPath(); ctx.arc(p.x, p.y, p.s * Math.max(.2, p.life) + .3, 0, TAU); ctx.fill(); }
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.textAlign = 'center';
+  for (const tx of texts) {
+    ctx.globalAlpha = Math.min(1, tx.life * 1.5); ctx.fillStyle = tx.color;
+    ctx.font = `700 ${tx.size}px "Chakra Petch", "Segoe UI", sans-serif`; ctx.fillText(tx.text, tx.x, tx.y);
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+  if (G.flash > 0) { ctx.fillStyle = `rgba(255,255,255,${G.flash * .5})`; ctx.fillRect(0, 0, W, H); }
+}
+
+// ---------- HUD & UI ----------
+let lastHud = '';
+function updateHud(force) {
+  if (!G || G.kind === 'attract') return;
+  const p = planetOf(G.planet);
+  const sig = [Math.floor(G.score), G.mult, G.dustRun, G.planet, G.shields].join('|');
+  if (!force && sig === lastHud) return; lastHud = sig;
+  $('#hScore').textContent = fmt(G.score);
+  $('#hMult').textContent = G.mult > 1 ? `×${G.mult.toFixed(2).replace(/\.?0+$/, '')} graze bonus` : '';
+  $('#hPlanet').textContent = p.name;
+  $('#hPlanet').style.color = `hsl(${p.h} 90% 72%)`;
+  $('#hPsub').textContent = G.kind === 'daily' ? `Daily · planet ${G.planet + 1}` : `Planet ${G.planet + 1}`;
+  $('#hDust').textContent = `✦ ${fmt(G.dustRun)}`;
+  $('#hShield').textContent = G.shields ? `Shield ×${G.shields}` : '';
+}
+let toastTimer = 0;
+function toast(msg) {
+  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2400);
+}
+function showBanner(i) {
+  const p = planetOf(i), d = document.createElement('div');
+  d.className = 'banner';
+  d.innerHTML = `<div class="bn" style="color:hsl(${p.h} 90% 72%)">${p.name}</div><div class="bs">Planet ${i + 1} · ${p.intro}</div>`;
+  document.body.appendChild(d); setTimeout(() => d.remove(), 2300);
+}
+function missionsHtml() {
+  return `<div><h3>Missions</h3><ul class="missions">${meta.missions.map(m => {
+    const v = Math.min(m.n, Math.floor(m.done ? m.n : m.type === 'runs' ? m.p : (m.best || 0)));
+    return `<li class="mission ${m.done ? 'done' : ''}"><div class="mt"><span>${MT[m.type].txt(m.n)}</span><span class="mr">${m.done ? '✓ +' + m.reward : '✦ ' + m.reward}</span></div><div class="bar"><i style="width:${v / m.n * 100}%"></i></div></li>`;
+  }).join('')}</ul></div>`;
+}
+function openPanel(html) { $('#panel').innerHTML = html; $('#overlay').hidden = false; const f = $('#panel [autofocus]') || $('#panel button'); if (f) f.focus({ preventScroll: true }); }
+function showMenu() {
+  mode = 'menu'; G = makeGame('attract'); $('#hud').hidden = true; $('#hint').hidden = true;
+  const today = meta.daily[todayStr()] || 0;
+  openPanel(`
+    <h1 class="logo">Orbit <span>Dash</span></h1>
+    <p class="tag">Switch orbits. Dodge late. Go further.</p>
+    <div class="statrow">
+      <div class="stat"><div class="l">Best</div><div class="v">${fmt(meta.best)}</div></div>
+      <div class="stat"><div class="l">Daily</div><div class="v">${fmt(today)}</div></div>
+      <div class="stat"><div class="l">Stardust</div><div class="v dust">✦ ${fmt(meta.dust)}</div></div>
+    </div>
+    <div class="btns">
+      <button class="btn primary" data-act="play" autofocus>Launch <kbd>Space</kbd></button>
+    </div>
+    <div class="btns">
+      <button class="btn" data-act="daily">Daily run</button>
+      <button class="btn" data-act="hangar">Hangar</button>
+    </div>
+    ${missionsHtml()}
+    <ol class="how">
+      <li><b>Tap</b> or press <b>Space</b> to jump between the two orbits.</li>
+      <li>Dodge at the last moment to <b>graze</b> a hazard. Each graze raises your score multiplier.</li>
+      <li>Every ${HOP_EVERY} seconds you slingshot to a new planet with a new kind of hazard.</li>
+      <li>Collect <b>stardust</b> for ships, trails and perks in the Hangar.</li>
+    </ol>`);
+}
+function gameOver() {
+  mode = 'over';
+  const fromScore = Math.floor(G.score / 150), earned = G.dustRun + fromScore;
+  meta.dust += earned; meta.runs++;
+  let newBest = false;
+  if (G.kind === 'daily') { if (G.score > (meta.daily[G.date] || 0)) { meta.daily[G.date] = Math.floor(G.score); newBest = true; } }
+  else if (G.score > meta.best) { meta.best = Math.floor(G.score); newBest = true; }
+  for (const m of meta.missions) {
+    if (m.type === 'runs' && !m.done) m.p++;
+    if (!m.done && m.type !== 'runs') m.best = Math.max(m.best || 0, missionValue(m));
+  }
+  checkMissions();
+  saveMeta();
+  const p = planetOf(G.planet), best = G.kind === 'daily' ? meta.daily[G.date] : meta.best;
+  overReady = performance.now() + 600;
+  openPanel(`
+    <h2>Crashed at <span style="color:hsl(${p.h} 90% 72%)">${p.name}</span></h2>
+    <div><div class="bigscore">${fmt(G.score)}</div>${newBest ? '<span class="newbest">New best!</span>' : `<p class="sub">${G.kind === 'daily' ? 'Today’s best' : 'Best'} ${fmt(best)}</p>`}</div>
+    <div class="statrow">
+      <div class="stat"><div class="l">Planet</div><div class="v">${G.planet + 1}</div></div>
+      <div class="stat"><div class="l">Grazes</div><div class="v">${G.grazes}</div></div>
+      <div class="stat"><div class="l">Time</div><div class="v">${Math.floor(G.t)}s</div></div>
+    </div>
+    <div class="reward">✦ +${earned} stardust (${G.dustRun} collected, ${fromScore} from score) · ${fmt(meta.dust)} total</div>
+    ${missionsHtml()}
+    <div class="btns">
+      <button class="btn primary" data-act="retry" autofocus>Retry <kbd>Space</kbd></button>
+      <button class="btn" data-act="hangar">Hangar</button>
+      <button class="btn" data-act="menu">Menu</button>
+    </div>`);
+}
+function hangarHtml() {
+  const swatch = s => s.color ? `background:${s.color};box-shadow:0 0 12px ${s.color}` : 'background:conic-gradient(#ff7ab8,#ffb347,#6cf2c2,#7fe7ff,#b38bff,#ff7ab8)';
+  const tSw = { ember: 'background:linear-gradient(90deg,transparent,#ffb347)', ion: 'background:linear-gradient(90deg,transparent,#7fe7ff)', sparks: 'background:radial-gradient(circle,#fff 2px,transparent 3px) 0 0/10px 10px', spectrum: 'background:linear-gradient(90deg,#ff7ab8,#ffb347,#6cf2c2,#7fe7ff)' };
+  const item = (kind, it, cur, sw) => {
+    const owned = meta.owned[it.id], on = cur === it.id, can = owned || meta.dust >= it.cost;
+    return `<button class="item ${on ? 'on' : ''}" data-act="${kind}" data-arg="${it.id}" ${can ? '' : 'disabled'}><span class="sw" style="${sw}"></span>${it.name}<span class="price">${on ? 'Equipped' : owned ? 'Equip' : '✦ ' + it.cost}</span></button>`;
+  };
+  const luckyCost = LUCKY_COST[meta.lucky];
+  return `<div class="head"><h2>Hangar</h2><span class="purse">✦ ${fmt(meta.dust)}</span></div>
+    <div><h3>Ship</h3><div class="shop">${SKINS.map(s => item('skin', s, meta.skin, swatch(s))).join('')}</div></div>
+    <div><h3>Trail</h3><div class="shop">${TRAILS.map(s => item('trail', s, meta.trail, tSw[s.id])).join('')}</div></div>
+    <div><h3>Perks</h3><div style="display:grid;gap:8px">
+      <div class="perk"><div class="pm"><div class="pn">Shield ×${meta.shields}</div><div class="pd">Absorbs one hit in a standard run. Used up when it saves you. Hold up to ${MAX_SHIELDS}.</div></div>
+        <button class="btn" data-act="shield" ${meta.shields < MAX_SHIELDS && meta.dust >= SHIELD_COST ? '' : 'disabled'}>${meta.shields >= MAX_SHIELDS ? 'Full' : '✦ ' + SHIELD_COST}</button></div>
+      <div class="perk"><div class="pm"><div class="pn">Magnet</div><div class="pd">Collect stardust on the other orbit as you pass it.</div></div>
+        <button class="btn" data-act="magnet" ${!meta.magnet && meta.dust >= MAGNET_COST ? '' : 'disabled'}>${meta.magnet ? 'Owned' : '✦ ' + MAGNET_COST}</button></div>
+      <div class="perk"><div class="pm"><div class="pn">Lucky Star ${'●'.repeat(meta.lucky)}${'○'.repeat(3 - meta.lucky)}</div><div class="pd">More stardust spawns, and longer dust lines.</div></div>
+        <button class="btn" data-act="lucky" ${luckyCost && meta.dust >= luckyCost ? '' : 'disabled'}>${luckyCost ? '✦ ' + luckyCost : 'Maxed'}</button></div>
+    </div></div>
+    <p class="sub" style="font-size:13px">Perks don’t apply to daily runs, so every player gets the same run.</p>
+    <div class="btns"><button class="btn primary" data-act="${hangarFrom === 'over' ? 'retry' : 'menu'}">${hangarFrom === 'over' ? 'Launch again' : 'Back'}</button></div>`;
+}
+let hangarFrom = 'menu';
+const buy = cost => { if (meta.dust < cost) return false; meta.dust -= cost; sfx.buy(); return true; };
+const actions = {
+  play: () => start('std'),
+  daily: () => start('daily'),
+  retry: () => start(G && G.kind === 'daily' ? 'daily' : 'std'),
+  menu: () => { sfx.ui(); showMenu(); },
+  hangar: () => { hangarFrom = mode; sfx.ui(); openPanel(hangarHtml()); },
+  skin: id => { const s = SKINS.find(x => x.id === id); if (!meta.owned[id] && !buy(s.cost)) return; meta.owned[id] = 1; meta.skin = id; saveMeta(); openPanel(hangarHtml()); },
+  trail: id => { const s = TRAILS.find(x => x.id === id); if (!meta.owned[id] && !buy(s.cost)) return; meta.owned[id] = 1; meta.trail = id; saveMeta(); openPanel(hangarHtml()); },
+  shield: () => { if (meta.shields < MAX_SHIELDS && buy(SHIELD_COST)) { meta.shields++; saveMeta(); openPanel(hangarHtml()); } },
+  magnet: () => { if (!meta.magnet && buy(MAGNET_COST)) { meta.magnet = 1; saveMeta(); openPanel(hangarHtml()); } },
+  lucky: () => { const c = LUCKY_COST[meta.lucky]; if (c && buy(c)) { meta.lucky++; saveMeta(); openPanel(hangarHtml()); } },
+  resume: () => { mode = 'play'; $('#overlay').hidden = true; }
+};
+$('#panel').addEventListener('click', e => {
+  const b = e.target.closest('[data-act]'); if (!b) return;
+  audio(); actions[b.dataset.act](b.dataset.arg);
+});
+$('#overlay').addEventListener('pointerdown', e => {
+  if (e.target.id !== 'overlay') return;
+  if (mode === 'over' && performance.now() > overReady && !$('#panel .shop')) actions.retry();
+  else if (mode === 'paused') actions.resume();
+});
+function pause() {
+  if (mode !== 'play' || !G.alive) return;
+  mode = 'paused';
+  openPanel(`<h2>Paused</h2><p class="sub">Score ${fmt(G.score)} · ${planetOf(G.planet).name}</p>
+    <div class="btns"><button class="btn primary" data-act="resume" autofocus>Resume <kbd>Space</kbd></button><button class="btn" data-act="menu">Quit to menu</button></div>`);
+}
+
+// ---------- input ----------
+function primary() {
+  audio();
+  if (mode === 'play') flip();
+  else if (mode === 'menu' && !$('#panel .shop')) start('std');
+  else if (mode === 'over' && performance.now() > overReady && !$('#panel .shop')) actions.retry();
+  else if (mode === 'paused') actions.resume();
+}
+cv.addEventListener('pointerdown', e => { e.preventDefault(); primary(); });
+document.addEventListener('keydown', e => {
+  if (e.repeat) return;
+  if ([' ', 'ArrowUp', 'ArrowDown', 'w', 'W', 's', 'S'].includes(e.key)) {
+    if (e.key === ' ' && document.activeElement && document.activeElement.tagName === 'BUTTON' && mode !== 'play') { e.preventDefault(); primary(); return; }
+    e.preventDefault(); primary();
+  } else if ((e.key === 'Escape' || e.key === 'p' || e.key === 'P') && mode === 'play') pause();
+});
+document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
+$('#soundBtn').addEventListener('click', e => {
+  meta.muted = !meta.muted; saveMeta();
+  e.currentTarget.textContent = meta.muted ? 'Sound off' : 'Sound on';
+  e.currentTarget.blur();
+  if (!meta.muted) sfx.ui();
+});
+$('#soundBtn').textContent = meta.muted ? 'Sound off' : 'Sound on';
+
+// ---------- loop ----------
+let last = performance.now();
+function frame(now) {
+  let dt = Math.min(.05, (now - last) / 1000); last = now;
+  if (mode === 'paused') dt = 0;
+  if (G.slow > 0) { G.slow -= dt; dt *= .3; }
+  update(dt);
+  draw();
+  if (mode === 'play') updateHud();
+  requestAnimationFrame(frame);
+}
+showMenu();
+requestAnimationFrame(frame);
+})();
+</script>
+
+</html>
